@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>semcache-router</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-0: #f4f4f2; --surface-1: #fcfcfb; --border: #e3e2de;
+    --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #8a8984;
+    --series-1: #2a78d6; --series-2: #eb6834; --grid: #ecebe7;
+    --good: #1a7f37; --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface-0: #111110; --surface-1: #1a1a19; --border: #2c2c2a;
+      --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+      --series-1: #3987e5; --series-2: #d95926; --grid: #262624; --good: #4ac26b;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-0: #111110; --surface-1: #1a1a19; --border: #2c2c2a;
+    --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+    --series-1: #3987e5; --series-2: #d95926; --grid: #262624; --good: #4ac26b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--surface-0); color: var(--text-primary);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1180px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 20px; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
+  .cfg { color: var(--text-muted); font: 12px var(--mono); }
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 12px; }
+  .kpi .label { color: var(--text-secondary); font-size: 12px; }
+  .kpi .value { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .kpi .sub { color: var(--text-muted); font-size: 12px; }
+  .good { color: var(--good); }
+  .grid2 { display: grid; grid-template-columns: 1.4fr 1fr; gap: 12px; margin-bottom: 12px; }
+  @media (max-width: 820px) { .grid2 { grid-template-columns: 1fr; } }
+  h2 { font-size: 14px; margin: 0 0 2px; }
+  .hint { color: var(--text-muted); font-size: 12px; margin: 0 0 10px; }
+  .chart { position: relative; height: 240px; }
+  form { display: flex; gap: 8px; flex-wrap: wrap; }
+  input[type=text] { flex: 1 1 260px; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--border);
+                     background: var(--surface-0); color: var(--text-primary); font: inherit; }
+  button { padding: 9px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--text-primary);
+           color: var(--surface-1); font: inherit; cursor: pointer; }
+  button.ghost { background: transparent; color: var(--text-secondary); }
+  #result { margin-top: 10px; font: 12px var(--mono); color: var(--text-secondary); white-space: pre-wrap; word-break: break-word; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { color: var(--text-secondary); font-weight: 500; }
+  td.q { white-space: normal; min-width: 240px; max-width: 420px; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--mono); }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 11px; border: 1px solid var(--border); color: var(--text-secondary); }
+  .pill.exact_hit::before, .pill.semantic_hit::before { content: "● "; color: var(--good); }
+  .pill.large::before { content: "▲ "; }
+  .pill.small::before { content: "▽ "; }
+  .note { color: var(--text-muted); font-size: 11px; display: block; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Semantic cache &amp; cost-aware routing</h1>
+    <span class="cfg" id="cfg">loading…</span>
+  </header>
+
+  <div class="card" style="margin-bottom:12px">
+    <form id="ask">
+      <input type="text" id="q" placeholder="Ask something — repeat or paraphrase it to see the cache hit" autocomplete="off" required>
+      <button type="submit">Send</button>
+      <button type="button" class="ghost" id="reset">Reset cache &amp; log</button>
+    </form>
+    <div id="result"></div>
+  </div>
+
+  <div class="kpis">
+    <div class="card kpi"><div class="label">Requests</div><div class="value" id="k-req">–</div><div class="sub" id="k-entries"></div></div>
+    <div class="card kpi"><div class="label">Cache hit rate</div><div class="value" id="k-hit">–</div><div class="sub" id="k-hitsplit"></div></div>
+    <div class="card kpi"><div class="label">Spend vs always-large</div><div class="value" id="k-cost">–</div><div class="sub" id="k-base"></div></div>
+    <div class="card kpi"><div class="label">Savings</div><div class="value good" id="k-save">–</div><div class="sub" id="k-per1k"></div></div>
+    <div class="card kpi"><div class="label">Latency p50 / p95</div><div class="value" id="k-lat">–</div><div class="sub" id="k-lookup"></div></div>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <h2>Cumulative cost</h2>
+      <p class="hint">Actual spend vs. the same traffic sent to the large model with no cache</p>
+      <div class="chart"><canvas id="c-cost" aria-label="Cumulative cost chart"></canvas></div>
+    </div>
+    <div class="card">
+      <h2>Where requests went</h2>
+      <p class="hint">Request count by path</p>
+      <div class="chart"><canvas id="c-path" aria-label="Requests by path chart"></canvas></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px">
+    <h2>Latency by path</h2>
+    <p class="hint">Log scale, ms — cache hits skip the model entirely</p>
+    <div class="chart" style="height:200px"><canvas id="c-lat" aria-label="Latency by path chart"></canvas></div>
+  </div>
+
+  <div class="card">
+    <h2>Recent requests</h2>
+    <p class="hint">Newest first · cost in USD</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Query</th><th>Path</th><th>Model</th><th>Sim</th><th>Route</th><th class="num">Tokens</th><th class="num">Cost</th><th class="num">Baseline</th><th class="num">Latency</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table></div>
+  </div>
+</main>
+
+<script>
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const usd = v => v == null ? "–" : (v < 0.01 ? "$" + v.toFixed(6) : "$" + v.toFixed(4));
+const PATH_LABEL = { exact_hit: "Exact hit", semantic_hit: "Semantic hit", small: "Small model", large: "Large model" };
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+let charts = {};
+function baseOpts(extra = {}) {
+  const t = css("--text-secondary"), g = css("--grid");
+  return {
+    responsive: true, maintainAspectRatio: false, animation: false,
+    interaction: { mode: "index", intersect: false },
+    plugins: { legend: { labels: { color: t, boxWidth: 12, boxHeight: 2 } },
+               tooltip: { backgroundColor: css("--surface-1"), titleColor: css("--text-primary"),
+                          bodyColor: t, borderColor: css("--border"), borderWidth: 1 } },
+    scales: { x: { ticks: { color: t }, grid: { display: false }, border: { color: g } },
+              y: { ticks: { color: t }, grid: { color: g }, border: { display: false }, beginAtZero: true } },
+    ...extra,
+  };
+}
+
+function initCharts() {
+  Object.values(charts).forEach(c => c.destroy());
+  const s1 = css("--series-1"), s2 = css("--series-2"), muted = css("--text-muted");
+  charts.cost = new Chart(document.getElementById("c-cost"), {
+    type: "line",
+    data: { labels: [], datasets: [
+      { label: "Actual spend", data: [], borderColor: s1, borderWidth: 2, pointRadius: 0, tension: 0.15 },
+      { label: "Always-large baseline", data: [], borderColor: muted, borderDash: [5, 4], borderWidth: 2, pointRadius: 0, tension: 0.15 },
+    ] },
+    options: baseOpts({ scales: { ...baseOpts().scales,
+      x: { ...baseOpts().scales.x, title: { display: true, text: "request #", color: muted } },
+      y: { ...baseOpts().scales.y, ticks: { color: css("--text-secondary"), callback: v => "$" + (+v.toPrecision(2)) } } },
+      plugins: { ...baseOpts().plugins, tooltip: { ...baseOpts().plugins.tooltip, callbacks: { label: c => `${c.dataset.label}: ${usd(c.raw)}` } } } }),
+  });
+  charts.path = new Chart(document.getElementById("c-path"), {
+    type: "bar",
+    data: { labels: Object.values(PATH_LABEL), datasets: [{ label: "Requests", data: [], backgroundColor: s1, borderRadius: 4, maxBarThickness: 36 }] },
+    options: baseOpts({ indexAxis: "y", plugins: { ...baseOpts().plugins, legend: { display: false } },
+      scales: { x: { ...baseOpts().scales.y, ticks: { color: css("--text-secondary"), precision: 0 } }, y: { ...baseOpts().scales.x } } }),
+  });
+  charts.lat = new Chart(document.getElementById("c-lat"), {
+    type: "bar",
+    data: { labels: Object.values(PATH_LABEL), datasets: [
+      { label: "p50", data: [], backgroundColor: s1, borderRadius: 4, maxBarThickness: 28 },
+      { label: "p95", data: [], backgroundColor: s2, borderRadius: 4, maxBarThickness: 28 },
+    ] },
+    options: baseOpts({ scales: { ...baseOpts().scales,
+      y: { ...baseOpts().scales.y, type: "logarithmic", beginAtZero: false, min: 0.01,
+           ticks: { color: css("--text-secondary"), callback: v => [0.01, 0.1, 1, 10, 100, 1000, 10000].includes(v) ? v + " ms" : "" } } },
+      plugins: { ...baseOpts().plugins, tooltip: { ...baseOpts().plugins.tooltip, callbacks: { label: c => `${c.dataset.label}: ${c.raw ?? 0} ms` } } } }),
+  });
+}
+
+async function refresh() {
+  const [s, rows] = await Promise.all([fetch("/stats").then(r => r.json()), fetch("/requests?limit=20").then(r => r.json())]);
+  const c = s.config;
+  document.getElementById("cfg").textContent =
+    `${c.embedder} · sim ≥ ${c.similarity_threshold}${c.entity_guard ? " + entity guard" : ""} · route ≥ ${c.route_threshold} · ${c.small_model} / ${c.large_model} · ${c.llm}`;
+  document.getElementById("k-req").textContent = s.requests;
+  document.getElementById("k-entries").textContent = `${s.cache_entries} cached answers`;
+  if (s.requests) {
+    document.getElementById("k-hit").textContent = (s.hit_rate * 100).toFixed(1) + "%";
+    document.getElementById("k-hitsplit").textContent = `${s.paths.exact_hit} exact · ${s.paths.semantic_hit} semantic`;
+    document.getElementById("k-cost").textContent = usd(s.total_cost_usd);
+    document.getElementById("k-base").textContent = `baseline ${usd(s.baseline_cost_usd)}`;
+    document.getElementById("k-save").textContent = s.savings_pct.toFixed(1) + "%";
+    document.getElementById("k-per1k").textContent = `${usd(s.cost_per_1k_requests_usd)} per 1k requests`;
+    document.getElementById("k-lat").textContent = `${Math.round(s.p50_latency_ms)} / ${Math.round(s.p95_latency_ms)}`;
+    document.getElementById("k-lookup").textContent = `avg lookup overhead ${s.avg_lookup_ms} ms`;
+  } else {
+    ["k-hit","k-cost","k-save","k-lat"].forEach(id => document.getElementById(id).textContent = "–");
+    ["k-hitsplit","k-base","k-per1k","k-lookup"].forEach(id => document.getElementById(id).textContent = "");
+  }
+  charts.cost.data.labels = s.series.map(p => p.i);
+  charts.cost.data.datasets[0].data = s.series.map(p => p.cost);
+  charts.cost.data.datasets[1].data = s.series.map(p => p.baseline);
+  charts.path.data.datasets[0].data = Object.keys(PATH_LABEL).map(k => s.paths[k] || 0);
+  charts.lat.data.datasets[0].data = Object.keys(PATH_LABEL).map(k => s.latency[k]?.p50_ms ?? null);
+  charts.lat.data.datasets[1].data = Object.keys(PATH_LABEL).map(k => s.latency[k]?.p95_ms ?? null);
+  Object.values(charts).forEach(ch => ch.update());
+
+  document.getElementById("rows").innerHTML = rows.map(r => `<tr>
+    <td class="q">${esc(r.query)}${r.note ? `<span class="note">${esc(r.note)}</span>` : ""}</td>
+    <td><span class="pill ${r.path}">${PATH_LABEL[r.path]}</span></td>
+    <td>${esc(r.model.split("/").pop())}</td>
+    <td class="num">${r.similarity != null ? r.similarity.toFixed(3) : "–"}</td>
+    <td class="num">${r.route_score != null ? r.route_score.toFixed(2) : "–"}</td>
+    <td class="num">${r.tokens_in + r.tokens_out}</td>
+    <td class="num">${usd(r.cost_usd)}</td>
+    <td class="num">${usd(r.baseline_cost_usd)}</td>
+    <td class="num">${r.latency_ms.toFixed(1)} ms</td></tr>`).join("");
+}
+
+document.getElementById("ask").addEventListener("submit", async e => {
+  e.preventDefault();
+  const q = document.getElementById("q").value.trim();
+  if (!q) return;
+  const out = document.getElementById("result");
+  out.textContent = "…";
+  const r = await fetch("/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query: q }) });
+  const a = await r.json();
+  if (!r.ok) { out.textContent = a.detail || "error"; return; }
+  const why = a.matched_query ? `matched "${a.matched_query}" (sim ${a.similarity})`
+            : `route score ${a.route_score}: ${(a.route_reasons || []).join(", ")}`;
+  out.textContent = `${PATH_LABEL[a.path]} · ${a.model} · ${usd(a.cost_usd)} · ${a.latency_ms.toFixed(1)} ms · ${why}${a.note ? "\n" + a.note : ""}\n\n${a.answer}`;
+  refresh();
+});
+document.getElementById("reset").addEventListener("click", async () => {
+  if (!confirm("Clear the cache and the request log?")) return;
+  await fetch("/reset", { method: "POST" });
+  document.getElementById("result").textContent = "";
+  refresh();
+});
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { initCharts(); refresh(); });
+
+initCharts();
+refresh();
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>
