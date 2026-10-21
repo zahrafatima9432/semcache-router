@@ -2,10 +2,10 @@
 
 A cost-control layer that sits in front of an LLM: it **reuses answers to questions it has already seen** (exact and paraphrased), **sends easy questions to a cheap model and hard ones to an expensive model**, and **logs cost and latency for every request** on a live dashboard — with a running comparison against what the same traffic would have cost with no cache and no router.
 
-![dashboard](docs/dashboard1.png)
-![dashboard](docs/dashboard2.png)
-![dashboard](docs/dashboard3.png)
-![dashboard](docs/dashboard4.png)
+![dashboard](docs/dashboard-1.png)
+![dashboard](docs/dashboard-2.png)
+![dashboard](docs/dashboard-3.png)
+![dashboard](docs/dashboard-4.png)
 
 ## Why this exists
 
